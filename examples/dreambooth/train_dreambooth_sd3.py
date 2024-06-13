@@ -304,6 +304,18 @@ def parse_args(input_args=None):
         help="A prompt that is used during validation to verify that the model is learning.",
     )
     parser.add_argument(
+        "--validation_width",
+        type=int,
+        default=1024,
+        help="Validation the width used to generate the image",
+    )
+    parser.add_argument(
+        "--validation_height",
+        type=int,
+        default=1024,
+        help="Validation the height used to generate the image",
+    )
+    parser.add_argument(
         "--num_validation_images",
         type=int,
         default=4,
@@ -1676,7 +1688,7 @@ def main(args):
                     variant=args.variant,
                     torch_dtype=weight_dtype,
                 )
-                pipeline_args = {"prompt": args.validation_prompt}
+                pipeline_args = {"prompt": args.validation_prompt,"width":args.validation_width,"height":args.validation_height}
                 images = log_validation(
                     pipeline=pipeline,
                     args=args,
@@ -1725,7 +1737,7 @@ def main(args):
         # run inference
         images = []
         if args.validation_prompt and args.num_validation_images > 0:
-            pipeline_args = {"prompt": args.validation_prompt}
+            pipeline_args = {"prompt": args.validation_prompt,"width":args.validation_width,"height":args.validation_height}
             images = log_validation(
                 pipeline=pipeline,
                 args=args,
