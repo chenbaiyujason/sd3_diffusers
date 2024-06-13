@@ -67,7 +67,7 @@ if is_wandb_available():
     import wandb
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.30.0.dev0")
+
 
 logger = get_logger(__name__)
 
@@ -322,7 +322,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--rank",
         type=int,
-        default=4,
+        default=64,
         help=("The dimension of the LoRA update matrices."),
     )
     parser.add_argument(
@@ -691,9 +691,20 @@ class DreamBoothDataset(Dataset):
             self.instance_data_root = Path(instance_data_root)
             if not self.instance_data_root.exists():
                 raise ValueError("Instance images root doesn't exists.")
+            instance_images = []
+            self.custom_instance_prompts = []
+            for filename in os.listdir(instance_data_root):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    image_path = os.path.join(instance_data_root, filename)
+                    instance_images.append(Image.open(image_path))
+                elif filename.endswith(".txt"):
+                    txt_path = os.path.join(instance_data_root, filename)
+                    with open(txt_path, 'r') as file:
+                        content = file.read()
+                        self.custom_instance_prompts.append(content)
+            if len(self.custom_instance_prompts) == 0 :
+                self.custom_instance_prompts = None
 
-            instance_images = [Image.open(path) for path in list(Path(instance_data_root).iterdir())]
-            self.custom_instance_prompts = None
 
         self.instance_images = []
         for img in instance_images:
@@ -1380,7 +1391,7 @@ def main(args):
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-
+    print(train_dataset.custom_instance_prompts)
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
@@ -1462,8 +1473,20 @@ def main(args):
                 bsz = model_input.shape[0]
 
                 # Sample a random timestep for each image
-                indices = torch.randint(0, noise_scheduler_copy.config.num_train_timesteps, (bsz,))
-                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
+                 # for weighting schemes where we sample timesteps non-uniformly
+                if args.weighting_scheme == "logit_normal":
+                    # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
+                    u = torch.normal(mean=args.logit_mean, std=args.logit_std, size=(bsz,), device=accelerator.device)
+                    u = torch.nn.functional.sigmoid(u)
+                elif args.weighting_scheme == "mode":
+                    u = torch.rand(size=(bsz,), device=accelerator.device)
+                    u = 1 - u - args.mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
+                else:
+                    u = torch.rand(size=(bsz,), device=accelerator.device)
+
+                indices = (u * noise_scheduler_copy.config.num_train_timesteps).long().to(device="cpu")
+                nt = noise_scheduler_copy.timesteps[indices]
+                timesteps = nt.to(device=model_input.device)
 
                 # Add noise according to flow matching.
                 sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
@@ -1485,14 +1508,12 @@ def main(args):
                 # TODO (kashif, sayakpaul): weighting sceme needs to be experimented with :)
                 if args.weighting_scheme == "sigma_sqrt":
                     weighting = (sigmas**-2.0).float()
-                elif args.weighting_scheme == "logit_normal":
-                    # See 3.1 in the SD3 paper ($rf/lognorm(0.00,1.00)$).
-                    u = torch.normal(mean=args.logit_mean, std=args.logit_std, size=(bsz,), device=accelerator.device)
-                    weighting = torch.nn.functional.sigmoid(u)
-                elif args.weighting_scheme == "mode":
-                    # See sec 3.1 in the SD3 paper (20).
-                    u = torch.rand(size=(bsz,), device=accelerator.device)
-                    weighting = 1 - u - args.mode_scale * (torch.cos(math.pi * u / 2) ** 2 - 1 + u)
+                elif args.weighting_scheme == "cosmap":
+                    bot = 1 - 2 * sigmas + 2 * sigmas**2
+                    weighting = 2 / (math.pi * bot)
+                else:
+                    weighting = torch.ones_like(sigmas)
+
 
                 # simplified flow matching aka 0-rectified flow matching loss
                 # target = model_input - noise
@@ -1631,7 +1652,7 @@ def main(args):
         # run inference
         images = []
         if args.validation_prompt and args.num_validation_images > 0:
-            pipeline_args = {"prompt": args.validation_prompt}
+            pipeline_args = {"prompt": args.validation_prompt,"width":1344,"height":768}
             images = log_validation(
                 pipeline=pipeline,
                 args=args,

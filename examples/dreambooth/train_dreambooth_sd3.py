@@ -1526,7 +1526,7 @@ def main(args):
                 bsz = model_input.shape[0]
 
                 # Sample a random timestep for each image
-                indices = torch.randint(0, noise_scheduler_copy.config.num_train_timesteps, (bsz,))
+                indices = torch.randint(0, noise_scheduler_copy.config.num_train_timesteps, (bsz,)).to(device="cpu")
                 timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
 
                 # Add noise according to flow matching.
