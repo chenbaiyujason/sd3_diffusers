@@ -1391,7 +1391,7 @@ def main(args):
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
-
+    print(train_dataset.custom_instance_prompts)
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
@@ -1642,7 +1642,7 @@ def main(args):
         # run inference
         images = []
         if args.validation_prompt and args.num_validation_images > 0:
-            pipeline_args = {"prompt": args.validation_prompt}
+            pipeline_args = {"prompt": args.validation_prompt,"width":1344,"height":768}
             images = log_validation(
                 pipeline=pipeline,
                 args=args,
