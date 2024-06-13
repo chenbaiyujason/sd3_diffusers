@@ -691,9 +691,20 @@ class DreamBoothDataset(Dataset):
             self.instance_data_root = Path(instance_data_root)
             if not self.instance_data_root.exists():
                 raise ValueError("Instance images root doesn't exists.")
+            instance_images = []
+            self.custom_instance_prompts = []
+            for filename in os.listdir(instance_data_root):
+                if filename.endswith(".jpg") or filename.endswith(".png"):
+                    image_path = os.path.join(instance_data_root, filename)
+                    instance_images.append(Image.open(image_path))
+                elif filename.endswith(".txt"):
+                    txt_path = os.path.join(instance_data_root, filename)
+                    with open(txt_path, 'r') as file:
+                        content = file.read()
+                        self.custom_instance_prompts.append(content)
+            if len(self.custom_instance_prompts) == 0 :
+                self.custom_instance_prompts = None
 
-            instance_images = [Image.open(path) for path in list(Path(instance_data_root).iterdir())]
-            self.custom_instance_prompts = None
 
         self.instance_images = []
         for img in instance_images:
